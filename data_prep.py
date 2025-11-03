@@ -67,7 +67,7 @@ class DataPreprocessor:
         if self.df.empty:
             raise ValueError("Dataset is empty")
         
-        print(f"✓ Data loaded: {self.df.shape[0]} rows × {self.df.shape[1]} columns")
+        print(f"[OK] Data loaded: {self.df.shape[0]} rows x {self.df.shape[1]} columns")
         return self.df
     
     def identify_target(self) -> str:
@@ -78,7 +78,7 @@ class DataPreprocessor:
             str: Name of the target column
         """
         self.target_col = self.df.columns[-1]
-        print(f"✓ Target variable identified: {self.target_col}")
+        print(f"[OK] Target variable identified: {self.target_col}")
         return self.target_col
     
     def separate_features_target(self) -> Tuple[pd.DataFrame, pd.Series]:
@@ -91,8 +91,8 @@ class DataPreprocessor:
         self.X = self.df.drop(columns=[self.target_col])
         self.y = self.df[self.target_col]
         
-        print(f"✓ Features: {self.X.shape[1]}")
-        print(f"✓ Target classes: {self.y.nunique()} ({sorted(self.y.unique())})")
+        print(f"[OK] Features: {self.X.shape[1]}")
+        print(f"[OK] Target classes: {self.y.nunique()} ({sorted(self.y.unique())})")
         return self.X, self.y
     
     def classify_features(self) -> Dict[str, List[str]]:
@@ -105,8 +105,8 @@ class DataPreprocessor:
         self.numeric_features = self.X.select_dtypes(include=[np.number]).columns.tolist()
         self.categorical_features = self.X.select_dtypes(include=['object']).columns.tolist()
         
-        print(f"\n✓ Numeric features: {len(self.numeric_features)}")
-        print(f"✓ Categorical features: {len(self.categorical_features)}")
+        print(f"\n[OK] Numeric features: {len(self.numeric_features)}")
+        print(f"[OK] Categorical features: {len(self.categorical_features)}")
         
         return {
             'numeric': self.numeric_features,
@@ -126,16 +126,16 @@ class DataPreprocessor:
         initial_missing = self.X.isnull().sum().sum()
         
         if initial_missing == 0:
-            print("✓ No missing values detected")
+            print("[OK] No missing values detected")
             return self.X
         
         if strategy == 'drop':
             self.X = self.X.dropna()
-            print(f"✓ Removed {initial_missing} rows with missing values")
+            print(f"[OK] Removed {initial_missing} rows with missing values")
         else:
             imputer = SimpleImputer(strategy=strategy)
             self.X[self.numeric_features] = imputer.fit_transform(self.X[self.numeric_features])
-            print(f"✓ Imputed {initial_missing} missing values using {strategy}")
+            print(f"[OK] Imputed {initial_missing} missing values using {strategy}")
         
         return self.X
     
@@ -149,7 +149,7 @@ class DataPreprocessor:
         self.le_target = LabelEncoder()
         self.y = pd.Series(self.le_target.fit_transform(self.y), index=self.y.index)
         
-        print(f"✓ Target encoded: {dict(zip(self.le_target.classes_, range(len(self.le_target.classes_))))}")
+        print(f"[OK] Target encoded: {dict(zip(self.le_target.classes_, range(len(self.le_target.classes_))))}")
         return self.y
     
     def encode_categorical_features(self, method: str = 'onehot') -> pd.DataFrame:
@@ -162,16 +162,21 @@ class DataPreprocessor:
         Returns:
             pd.DataFrame: Dataset with encoded categorical features
         """
+        # If no categorical features, return a copy of X
+        if not self.categorical_features:
+            print("[OK] No categorical features to encode")
+            return self.X.copy()
+        
         if method == 'onehot':
             X_encoded = pd.get_dummies(self.X, columns=self.categorical_features, 
                                        drop_first=False, dtype=int)
-            print(f"✓ One-Hot Encoding applied to {len(self.categorical_features)} features")
+            print(f"[OK] One-Hot Encoding applied to {len(self.categorical_features)} features")
         else:
             encoder = OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1)
             X_categorical = self.X[self.categorical_features].copy()
             X_encoded = self.X.copy()
             X_encoded[self.categorical_features] = encoder.fit_transform(X_categorical)
-            print(f"✓ Ordinal Encoding applied to {len(self.categorical_features)} features")
+            print(f"[OK] Ordinal Encoding applied to {len(self.categorical_features)} features")
         
         return X_encoded
     
@@ -187,11 +192,15 @@ class DataPreprocessor:
         """
         numeric_cols = X_encoded.select_dtypes(include=[np.number]).columns.tolist()
         
+        if not numeric_cols:
+            print("[OK] No numeric columns to standardize")
+            return X_encoded.copy()
+        
         self.scaler = StandardScaler()
         X_scaled = X_encoded.copy()
         X_scaled[numeric_cols] = self.scaler.fit_transform(X_encoded[numeric_cols].fillna(0))
         
-        print(f"✓ Standardized {len(numeric_cols)} numeric features (mean=0, std=1)")
+        print(f"[OK] Standardized {len(numeric_cols)} numeric features (mean=0, std=1)")
         return X_scaled
     
     def create_engineered_features(self, X_processed: pd.DataFrame) -> pd.DataFrame:
@@ -205,28 +214,43 @@ class DataPreprocessor:
             pd.DataFrame: Dataset with additional engineered features
         """
         X_engineered = X_processed.copy()
+        engineered_count = 0
         
-        # Identify columns for feature engineering
-        study_cols = [col for col in self.X.columns if 'study' in col.lower()]
-        gpa_cols = [col for col in self.X.columns if 'gpa' in col.lower()]
-        game_cols = [col for col in self.X.columns if col.startswith('G-')]
-        visual_cols = [col for col in self.X.columns if any(x in col.lower() for x in ['map', 'diagram'])]
-        internet_cols = [col for col in self.X.columns if 'internet' in col.lower()]
+        # Identify columns for feature engineering (case-insensitive, flexible matching)
+        numeric_cols = X_processed.select_dtypes(include=[np.number]).columns.tolist()
         
-        # Create engineered features
-        if study_cols and gpa_cols:
-            X_engineered['Study_Efficiency'] = self.X[study_cols[0]] / (self.X[gpa_cols[0]] + 1e-6)
-            
-        if game_cols:
-            X_engineered['Gaming_Engagement'] = self.X[game_cols].sum(axis=1)
-            
-        if visual_cols:
-            X_engineered['Visual_Learning'] = self.X[visual_cols].sum(axis=1)
-            
-        if internet_cols:
-            X_engineered['Internet_Usage'] = self.X[internet_cols[0]]
+        # Create engineered features from numeric columns if available
+        if len(numeric_cols) >= 2:
+            try:
+                # Create a ratio feature (efficiency score)
+                X_engineered['Efficiency_Score'] = (
+                    X_processed[numeric_cols[0]] / (X_processed[numeric_cols[1]] + 1e-6)
+                )
+                engineered_count += 1
+            except Exception:
+                pass
         
-        print(f"✓ Created {len([col for col in X_engineered.columns if col not in X_processed.columns])} engineered features")
+        if len(numeric_cols) >= 3:
+            try:
+                # Create an engagement score (average of multiple features)
+                X_engineered['Engagement_Score'] = X_processed[numeric_cols[:3]].mean(axis=1)
+                engineered_count += 1
+            except Exception:
+                pass
+        
+        if len(numeric_cols) >= 4:
+            try:
+                # Create a learning score (sum normalized)
+                X_engineered['Learning_Index'] = X_processed[numeric_cols[:4]].sum(axis=1)
+                engineered_count += 1
+            except Exception:
+                pass
+        
+        if engineered_count > 0:
+            print(f"[OK] Created {engineered_count} engineered features")
+        else:
+            print("[OK] Feature engineering: using existing features (insufficient data for new features)")
+        
         return X_engineered
     
     def get_processed_data(self) -> Tuple[pd.DataFrame, pd.Series]:
@@ -260,7 +284,7 @@ class DataPreprocessor:
         X_final = self.create_engineered_features(X_scaled)
         
         print("\n" + "=" * 80)
-        print(f"✓ PREPROCESSING COMPLETE")
+        print("[OK] PREPROCESSING COMPLETE")
         print(f"  Final feature set: {X_final.shape[1]} features")
         print(f"  Sample size: {X_final.shape[0]} students")
         print("=" * 80 + "\n")
